@@ -1055,6 +1055,7 @@ func (c *Collector) SetCache(cache Cache) error {
 		return err
 	}
 	c.cache = cache
+	c.backend.CacheBackend = cache
 	return nil
 }
 
