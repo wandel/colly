@@ -119,6 +119,7 @@ type Collector struct {
 	// Set it to 0 for infinite requests (default).
 	MaxRequests uint32
 
+	cache                    Cache
 	store                    storage.Storage
 	debugger                 debug.Debugger
 	robotsMap                map[string]*robotstxt.RobotsData
@@ -471,12 +472,25 @@ func (c *Collector) Init() {
 	c.Headers = nil
 	c.MaxDepth = 0
 	c.MaxRequests = 0
+	if c.cache == nil {
+		if c.CacheDir == "" {
+			c.cache = &NullCache{}
+		} else {
+			c.cache = &FileSystemCache{
+				BaseDir: c.CacheDir,
+			}
+		}
+	} else if c.CacheDir != "" {
+		log.Fatalln("you can not use both SetCache and CacheDir options at the same time")
+	}
+	c.cache.Init()
 	c.store = &storage.InMemoryStorage{}
 	c.store.Init()
 	c.MaxBodySize = 10 * 1024 * 1024
 	c.backend = &httpBackend{}
 	jar, _ := cookiejar.New(nil)
-	c.backend.Init(jar)
+
+	c.backend.Init(jar, c.cache)
 	c.backend.Client.CheckRedirect = c.checkRedirectFunc()
 	c.wg = &sync.WaitGroup{}
 	c.lock = &sync.RWMutex{}
@@ -708,7 +722,7 @@ func (c *Collector) fetch(u, method string, depth int, requestData io.Reader, ct
 		c.handleOnResponseHeaders(&Response{Ctx: ctx, Request: request, StatusCode: statusCode, Headers: &headers})
 		return !request.abort
 	}
-	response, err := c.backend.Cache(req, c.MaxBodySize, checkHeadersFunc, c.CacheDir)
+	response, err := c.backend.Cache(req, c.MaxBodySize, checkHeadersFunc)
 	if proxyURL, ok := req.Context().Value(ProxyURLKey).(string); ok {
 		request.ProxyURL = proxyURL
 	}
@@ -1033,6 +1047,15 @@ func (c *Collector) SetStorage(s storage.Storage) error {
 	}
 	c.store = s
 	c.backend.Client.Jar = createJar(s)
+	return nil
+}
+
+func (c *Collector) SetCache(cache Cache) error {
+	if err := cache.Init(); err != nil {
+		return err
+	}
+	c.cache = cache
+	c.backend.CacheBackend = cache
 	return nil
 }
 
